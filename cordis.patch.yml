@@ -1,19 +1,19 @@
-# mira_audio -- DSH 的「声音」插件 bundle patch
+# mira_media -- DSH 的「声音」插件 bundle patch
 #
 # ASCII only on purpose: the Loader reads this at startup and this machine's
 # console tooling mixes code pages (GBK vs UTF-8).
 #
 # This file is only the BASELINE. The authoritative config is
-#   $DSH_HOME/mira_config/mira_audio/config.json
+#   $DSH_HOME/mira_config/mira_media/config.json
 # which the settings page ("Settings - Sound") writes and which wins from then
 # on. Every default below is documented in README.md (config table); the Aliyun
 # API key is NEVER stored here -- it lives in
-#   $DSH_HOME/mira_config/mira_audio/creds/dashscope.json  (mode 600)
+#   $DSH_HOME/mira_config/mira_media/creds/dashscope.json  (mode 600)
 # On first start the TTS/ASR/VAD section is seeded from the old muse_vtuber
 # config if that file exists (see README "migration").
 - insert:
-    - id: mira_audio
-      name: mira_audio
+    - id: mira_media
+      name: mira_media
       config:
         enabled: true
         tts:

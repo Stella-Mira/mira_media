@@ -1,7 +1,7 @@
 {
-  "name": "mira_audio",
-  "version": "1.0.0",
-  "description": "DSH「声音」插件：语音合成（TTS）/ 语音识别（ASR）/ 断句（VAD 切分），持有唯一一份阿里云凭据；对外提供 miraAudio 服务与 audio_say / audio_status，设置页「声音」，页面侧带一个全局播放器",
+  "name": "mira_media",
+  "version": "2.0.0",
+  "description": "DSH「声音」插件：语音合成（TTS）/ 语音识别（ASR）/ 断句（VAD 切分），持有唯一一份阿里云凭据；对外提供 miraMedia 服务与 device_say / media_status，设置页「声音」，页面侧带一个全局播放器",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -41,6 +41,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Stella-Mira/mira_audio.git"
+    "url": "git+https://github.com/Stella-Mira/mira_media.git"
   }
 }

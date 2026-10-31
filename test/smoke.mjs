@@ -1,5 +1,5 @@
 /**
- * mira_audio / test/smoke.mjs —— 离线自检（不需要 DSH、不联网、不碰真 ~/.dsh）
+ * mira_media / test/smoke.mjs —— 离线自检（不需要 DSH、不联网、不碰真 ~/.dsh）
  *
  * 覆盖：
  *   A kit 副本一致 / B 配置规整与迁移 / C 配置仓库 / D 阿里云三件事（假 fetch）
@@ -233,13 +233,11 @@ const kit = await import('../lib/kit.mjs')
 const configMod = await import('../lib/config.js')
 const aliyunMod = await import('../lib/aliyun.js')
 const vadMod = await import('../lib/vad.js')
-const hubMod = await import('../lib/hub.js')
-const storeMod = await import('../lib/audio-store.js')
 const routesMod = await import('../lib/routes.js')
 const toolsMod = await import('../lib/tools.js')
 const indexMod = await import('../lib/index.js')
 
-const BASE = kit.miraConfigDir('mira_audio')
+const BASE = kit.miraConfigDir('mira_media')
 
 /* ══════════════════════════════════════════════════════════
  * A. kit 副本一致
@@ -432,63 +430,6 @@ await t('D6 ASR 空音频：asr/failed', async () => {
   await assert.rejects(() => service.transcribe({ base64: '  ' }), /音频为空/)
 })
 
-await t('D7 识图：base/model 由调用方给；原生口不通时切兼容口并记住', async () => {
-  let native = 0
-  let compat = 0
-  const fetchImpl = async (url) => {
-    const target = String(url)
-    if (target.includes('/services/aigc/multimodal-generation/generation')) {
-      native += 1
-      return {
-        ok: false,
-        status: 404,
-        headers: { get: () => 'application/json' },
-        async text() {
-          return '{"message":"Model not exist."}'
-        },
-      }
-    }
-    if (target.endsWith('/chat/completions')) {
-      compat += 1
-      return jsonResponse({ choices: [{ message: { content: '画面里有一张桌子。' } }] })
-    }
-    throw new Error('没预料到的地址：' + target)
-  }
-  const service = new aliyunMod.AliyunService({
-    config: CFG,
-    baseDir: join(SANDBOX, 'creds-d7'),
-    configFile: 'x',
-    fetchImpl,
-  })
-  service.writeCreds({ apiKey: 'k' })
-  const first = await service.describeImage({
-    dataUrl: 'data:image/jpeg;base64,AAAA',
-    base: 'https://gateway.example/api/v1',
-    model: 'qwen3.8-flash',
-  })
-  assert.equal(first.text, '画面里有一张桌子。')
-  assert.equal(first.model, 'qwen3.8-flash')
-  assert.equal(native, 1)
-  assert.equal(compat, 1)
-  const second = await service.describeImage({
-    dataUrl: 'data:image/jpeg;base64,AAAA',
-    base: 'https://gateway.example/api/v1',
-    model: 'qwen3.8-flash',
-  })
-  assert.equal(second.text, '画面里有一张桌子。')
-  assert.equal(native, 1, '记住之后不该再试原生口')
-  assert.equal(compat, 2)
-})
-
-await t('D8 识图缺 base/model：config/missing', async () => {
-  const { service } = makeAliyun([], {}, join(SANDBOX, 'creds-d8'))
-  service.writeCreds({ apiKey: 'k' })
-  await assert.rejects(() => service.describeImage({ dataUrl: 'data:image/jpeg;base64,AAAA' }), (error) => {
-    assert.equal(error.code, 'config/missing')
-    return true
-  })
-})
-
 /* ══════════════════════════════════════════════════════════
  * E. VAD 断句
  * ══════════════════════════════════════════════════════════ */
@@ -547,35 +488,6 @@ await t('E3 太短的杂音不回调（当作没听到）', () => {
 })
 
 /* ══════════════════════════════════════════════════════════
- * F. SSE 总线 + 音频暂存
- * ══════════════════════════════════════════════════════════ */
-
-await t('F1 attach 立刻收到 hello；broadcast 逐帧带 seq', () => {
-  const hub = new hubMod.EventHub()
-  const res = new FakeRes()
-  hub.attach(new FakeReq({ headers: {} }), res)
-  assert.equal(hub.clientCount, 1)
-  hub.broadcast('say', { text: 'hi' })
-  const frames = res.text.split('\n\n').filter((x) => x.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)))
-  assert.equal(frames[0].type, 'hello')
-  assert.equal(frames[1].type, 'say')
-  assert.ok(frames[1].seq > frames[0].seq)
-  hub.dispose()
-  assert.equal(hub.clientCount, 0)
-})
-
-await t('F2 AudioStore：上限淘汰 + TTL + status', () => {
-  const store = new storeMod.AudioStore({ limit: 2, ttlMs: 1000 })
-  const a = store.put(Buffer.from('a'), 'audio/wav')
-  const b = store.put(Buffer.from('b'), 'audio/wav')
-  const c = store.put(Buffer.from('c'), 'audio/wav')
-  assert.equal(store.get(a), null)
-  assert.equal(store.get(b).mime, 'audio/wav')
-  assert.ok(store.get(c))
-  assert.equal(store.status().size, 2)
-})
-
-/* ══════════════════════════════════════════════════════════
  * G. HTTP 面
  * ══════════════════════════════════════════════════════════ */
 
@@ -591,22 +503,17 @@ async function makeDeps({ fetchRoutes = [], creds = true } = {}) {
     fetchImpl: makeFetch(fetchRoutes),
   })
   if (creds) aliyunSvc.writeCreds({ apiKey: 'sk-http-test' })
-  const hub = new hubMod.EventHub({ counters })
-  const audioStore = new storeMod.AudioStore()
   const deps = {
     configStore,
     aliyun: () => {
       aliyunSvc.setConfig(configStore.current())
       return aliyunSvc
     },
-    hub,
-    audioStore,
     logger: { info() {}, warn() {}, debug() {} },
     counters,
-    speak: (cfg, text, voice) => routesMod.speak(deps, cfg, text, voice),
   }
   const handler = routesMod.createHandler(deps)
-  return { deps, handler, configStore, hub, audioStore }
+  return { deps, handler, configStore }
 }
 
 async function call(handler, { method = 'GET', url = '/', headers = {}, body = null }) {
@@ -619,73 +526,56 @@ async function call(handler, { method = 'GET', url = '/', headers = {}, body = n
 }
 
 await t('G1 health / bootstrap 可读，bootstrap 带 vad 与 endpoints', async () => {
-  const { handler, hub } = await makeDeps()
-  const health = await call(handler, { url: '/audio/api/health' })
+  const { handler } = await makeDeps()
+  const health = await call(handler, { url: '/media/api/health' })
   assert.equal(health.status, 200)
-  assert.equal(health.json.plugin, 'mira_audio')
-  const boot = await call(handler, { url: '/audio/api/bootstrap' })
+  assert.equal(health.json.plugin, 'mira_media')
+  const boot = await call(handler, { url: '/media/api/bootstrap' })
   assert.equal(boot.status, 200)
-  assert.ok(boot.json.endpoints.events)
+  assert.equal(boot.json.endpoints.events, undefined)
   assert.equal(boot.json.config.vad.silenceMs, 650)
   assert.equal(boot.json.features.configured, true)
   assert.equal(JSON.stringify(boot.json).includes('sk-http-test'), false)
-  hub.dispose()
 })
 
 await t('G2 跨站请求 403', async () => {
-  const { handler, hub } = await makeDeps()
-  const bad = await call(handler, { url: '/audio/api/bootstrap', headers: { origin: 'https://evil.example', host: '127.0.0.1:3080' } })
+  const { handler } = await makeDeps()
+  const bad = await call(handler, { url: '/media/api/bootstrap', headers: { origin: 'https://evil.example', host: '127.0.0.1:3080' } })
   assert.equal(bad.status, 403)
   assert.equal(bad.json.error.code, 'http/forbidden')
-  const ok = await call(handler, { url: '/audio/api/bootstrap', headers: { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' } })
+  const ok = await call(handler, { url: '/media/api/bootstrap', headers: { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' } })
   assert.equal(ok.status, 200)
-  hub.dispose()
 })
 
-await t('G3 POST /say：合成 → 广播 say → 音频可取回', async () => {
-  const { handler, hub, audioStore } = await makeDeps({
-    fetchRoutes: [
-      ['/services/audio/tts/SpeechSynthesizer', () => jsonResponse({ output: { audio: { url: TTS_URL } } })],
-      ['fake-audio.invalid', () => audioBytes(64)],
-    ],
-  })
-  const res = new FakeRes()
-  hub.attach(new FakeReq({ headers: {} }), res)
-  const out = await call(handler, { url: '/audio/api/say', method: 'POST', body: { text: '你好' } })
-  assert.equal(out.json.ok, true)
-  assert.equal(out.json.delivered, true)
-  assert.ok(String(out.json.url).startsWith('/audio/api/audio/'))
-  assert.ok(res.text.includes('"type":"say"'))
-  const id = String(out.json.url).split('/').pop()
-  const audio = await call(handler, { url: '/audio/api/audio/' + id })
-  assert.equal(audio.status, 200)
-  assert.equal(audio.res.headers['content-type'], 'audio/wav')
-  assert.equal(audioStore.get(id).buffer.length, 64)
-  hub.dispose()
+await t('G3 /say 与 /media/api/audio/<id> 已删除：404', async () => {
+  const { handler } = await makeDeps()
+  const say = await call(handler, { url: '/media/api/say', method: 'POST', body: { text: '你好' } })
+  assert.equal(say.status, 404)
+  const audio = await call(handler, { url: '/media/api/audio/nope' })
+  assert.equal(audio.status, 404)
 })
 
 await t('G4 POST /asr：只回文本（插话由输入侧负责）', async () => {
-  const { handler, hub } = await makeDeps({
+  const { handler } = await makeDeps({
     fetchRoutes: [['multimodal-generation', () => jsonResponse({ output: { text: '我回来了' } })]],
   })
   const out = await call(handler, {
-    url: '/audio/api/asr',
+    url: '/media/api/asr',
     method: 'POST',
     body: { base64: 'AAAA', mime: 'audio/wav', sampleRate: 16000 },
   })
   assert.equal(out.status, 200)
   assert.equal(out.json.text, '我回来了')
   assert.equal(out.json.steered, undefined, 'audio 不该自己往会话里插话')
-  hub.dispose()
 })
 
 await t('G5 settings：key 不回显，能写回配置与 600 凭据', async () => {
-  const { handler, configStore, hub } = await makeDeps({ creds: false })
-  const view = await call(handler, { url: '/audio/api/settings' })
+  const { handler, configStore } = await makeDeps({ creds: false })
+  const view = await call(handler, { url: '/media/api/settings' })
   assert.equal(view.status, 200)
   assert.equal(view.json.keyConfigured, false)
   const saved = await call(handler, {
-    url: '/audio/api/settings',
+    url: '/media/api/settings',
     method: 'POST',
     body: { values: { tts: { voice: 'Serena' }, vad: { silenceMs: 800 } }, apiKey: 'sk-new-key' },
   })
@@ -696,17 +586,15 @@ await t('G5 settings：key 不回显，能写回配置与 600 凭据', async () 
   const creds = JSON.parse(readFileSync(join(configStore.baseDir, 'creds', 'dashscope.json'), 'utf8'))
   assert.equal(creds.apiKey, 'sk-new-key')
   assert.equal(saved.text.includes('sk-new-key'), false)
-  const after = await call(handler, { url: '/audio/api/settings' })
+  const after = await call(handler, { url: '/media/api/settings' })
   assert.equal(after.json.keyConfigured, true)
-  hub.dispose()
 })
 
-await t('G6 未知音频 id：404 audio/not-found', async () => {
-  const { handler, hub } = await makeDeps()
-  const out = await call(handler, { url: '/audio/api/audio/nope' })
+await t('G6 未知路由：404 http/not-found', async () => {
+  const { handler } = await makeDeps()
+  const out = await call(handler, { url: '/media/api/audio/nope' })
   assert.equal(out.status, 404)
-  assert.equal(out.json.error.code, 'audio/not-found')
-  hub.dispose()
+  assert.equal(out.json.error.code, 'http/not-found')
 })
 
 /* ══════════════════════════════════════════════════════════
@@ -725,12 +613,9 @@ async function makeToolEnv({ withClient = true, fetchRoutes = [] } = {}) {
     fetchImpl: makeFetch(fetchRoutes),
   })
   aliyunSvc.writeCreds({ apiKey: 'sk-tool-test' })
-  const hub = new hubMod.EventHub({ counters })
-  const audioStore = new storeMod.AudioStore()
   let clientRes = null
   if (withClient) {
     clientRes = new FakeRes()
-    hub.attach(new FakeReq({ headers: {} }), clientRes)
   }
   const deps = {
     configStore,
@@ -738,76 +623,40 @@ async function makeToolEnv({ withClient = true, fetchRoutes = [] } = {}) {
       aliyunSvc.setConfig(configStore.current())
       return aliyunSvc
     },
-    hub,
-    audioStore,
     logger: { info() {}, warn() {}, debug() {} },
     counters,
-    speak: (cfg, text, voice) => routesMod.speak(deps, cfg, text, voice),
   }
   deps.statusView = () => toolsMod.statusView(deps)
   const ctx = makeCtx()
   const dispose = toolsMod.registerTools(ctx, deps)
-  return { ctx, deps, dispose, hub, clientRes, registered: ctx.registered }
+  return { ctx, deps, dispose, registered: ctx.registered }
 }
 
-await t('H1 注册 2 个工具', async () => {
+await t('H1 只注册 media_status（说话已搬去 mira_device）', async () => {
   const env = await makeToolEnv()
-  assert.deepEqual([...env.registered.keys()].sort(), [...toolsMod.TOOL_NAMES].sort())
-  assert.equal(toolsMod.TOOL_NAMES.length, 2)
+  assert.deepEqual([...env.registered.keys()], ['media_status'])
+  assert.equal(toolsMod.TOOL_NAMES.length, 1)
   env.dispose()
-  env.hub.dispose()
-})
-
-await t('H2 audio_say：没有页面 → delivery/failed；空文本 → tts/failed', async () => {
-  const env = await makeToolEnv({ withClient: false })
-  const noPage = JSON.parse(await env.registered.get('audio_say').execute({ text: '你好' }, {}))
-  assert.equal(noPage.ok, false)
-  assert.equal(noPage.error.code, 'delivery/failed')
-  const empty = JSON.parse(await env.registered.get('audio_say').execute({ text: '  ' }, {}))
-  assert.equal(empty.error.code, 'tts/failed')
-  env.dispose()
-  env.hub.dispose()
-})
-
-await t('H3 audio_say：有页面 → 合成 + 广播；audio_status 不带 key', async () => {
-  const env = await makeToolEnv({
-    fetchRoutes: [
-      ['/services/audio/tts/SpeechSynthesizer', () => jsonResponse({ output: { audio: { url: TTS_URL } } })],
-      ['fake-audio.invalid', () => audioBytes(48)],
-    ],
-  })
-  const said = JSON.parse(await env.registered.get('audio_say').execute({ text: '你好呀' }, {}))
-  assert.equal(said.ok, true)
-  assert.equal(said.clients, 1)
-  assert.ok(env.clientRes.text.includes('"type":"say"'))
-  const status = JSON.parse(await env.registered.get('audio_status').execute({}, {}))
-  assert.equal(status.ok, true)
-  assert.equal(status.plugin, 'mira_audio')
-  assert.equal(status.credentials.configured, true)
-  assert.equal(JSON.stringify(status).includes('sk-tool-test'), false)
-  assert.equal(status.vad.silenceMs, 650)
-  env.dispose()
-  env.hub.dispose()
 })
 
 /* ══════════════════════════════════════════════════════════
  * I. 入口装配 / 单实例 / 退场
  * ══════════════════════════════════════════════════════════ */
 
-await t('I1 apply：提供服务 + 2 个工具 + /audio 路由', () => {
+await t('I1 apply：提供服务 + 1 个工具 + /media 路由', () => {
   const ctx = makeCtx()
   try {
     const result = indexMod.apply(ctx, {})
     assert.equal(result.ok, true)
-    assert.equal(result.service, 'miraAudio')
-    assert.equal(result.tools, 2)
-    assert.equal(ctx.registered.size, 2)
+    assert.equal(result.service, 'miraMedia')
+    assert.equal(result.tools, 1)
+    assert.equal(ctx.registered.size, 1)
     assert.equal(ctx.routes.length, 1)
     assert.equal(ctx.routes[0].path, '/audio')
-    const api = ctx.provided.get('miraAudio')
-    assert.ok(api && typeof api.say === 'function' && typeof api.transcribe === 'function')
+    const api = ctx.provided.get('miraMedia')
+    assert.ok(api && typeof api.synthesize === 'function' && typeof api.transcribe === 'function')
     assert.ok(typeof api.createSegmenter === 'function')
-    assert.ok(typeof api.describeImage === 'function')
+    assert.ok(typeof api.describeImage === 'function', '识图保留')
     assert.equal(typeof api.vad().silenceMs, 'number')
     assert.equal(JSON.parse(readFileSync(result.configFile, 'utf8')).schemaVersion, 1)
   } finally {
@@ -854,11 +703,11 @@ await t('I4 凭据迁移：旧 muse_vtuber 的 key 搬到新目录（600）', ()
   mkdirSync(legacyDir, { recursive: true })
   writeFileSync(join(legacyDir, 'dashscope.json'), JSON.stringify({ schemaVersion: 1, apiKey: 'sk-legacy-key' }), { mode: 0o600 })
   // 清掉本插件自己的凭据（前面的用例可能建过）
-  rmSync(join(home, 'mira_config', 'mira_audio', 'creds'), { recursive: true, force: true })
+  rmSync(join(home, 'mira_config', 'mira_media', 'creds'), { recursive: true, force: true })
   const ctx = makeCtx()
   try {
     indexMod.apply(ctx, {})
-    const creds = JSON.parse(readFileSync(join(home, 'mira_config', 'mira_audio', 'creds', 'dashscope.json'), 'utf8'))
+    const creds = JSON.parse(readFileSync(join(home, 'mira_config', 'mira_media', 'creds', 'dashscope.json'), 'utf8'))
     assert.equal(creds.apiKey, 'sk-legacy-key')
   } finally {
     ctx.dispose()

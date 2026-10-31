@@ -1,17 +1,17 @@
-# mira_audio — DSH 的「声音」
+# mira_media — DSH 的「声音」
 
 三件套里的**第 1 件**：语音合成（TTS）/ 语音识别（ASR）/ 断句（VAD 切分），并且是**唯一**
-保存阿里云凭据的地方。别的插件（`mira_input` 采集、`muse_vtuber` 形象，以及以后的任何插件）
-`inject: ['miraAudio']` 就能用，不需要再存一份 key。
+保存阿里云凭据的地方。别的插件（`mira_device` 采集、`muse_vtuber` 形象，以及以后的任何插件）
+`inject: ['miraMedia']` 就能用，不需要再存一份 key。
 
 ```
 muse_vtuber ──┐
-              ├─→ mira_input ──→ mira_audio        （箭头 = "依赖"）
+              ├─→ mira_device ──→ mira_media        （箭头 = "依赖"）
 muse_galaxy ──┘   （输入/采集口）  （TTS/ASR/VAD/凭据）
 ```
 
 - 版本：**1.0.0**（2026-11-01 从 `muse_vtuber` 3.1.0 拆出）
-- 位置：`PluginDSH/mira_audio`
+- 位置：`PluginDSH/mira_media`
 - 依赖：**零第三方依赖**（只用 `node:` 内置 + 浏览器 API）
 
 ---
@@ -27,16 +27,16 @@ muse_galaxy ──┘   （输入/采集口）  （TTS/ASR/VAD/凭据）
 | 播放 | 页面侧一个**全局播放器**（不占槽位）：任一页签在场就能出声；形象只订阅播放状态对口型 |
 | 设置页 | `settings.section` → **「声音」**：TTS / ASR / VAD / API key |
 
-它**不负责**：录音、摄像头、画面识别（这些是 `mira_input`）；插话（steer）也不在这里——
+它**不负责**：录音、摄像头、画面识别（这些是 `mira_device`）；插话（steer）也不在这里——
 "要不要把识别结果变成会话里的一条消息"是感知生产者的策略。
 
 ## 2. 落盘（约定1 / 约定3 / 约定7）
 
 ```
-$DSH_HOME/mira_config/mira_audio/          # DSH_HOME 缺省 ~/.dsh
+$DSH_HOME/mira_config/mira_media/          # DSH_HOME 缺省 ~/.dsh
   config.json             配置（schemaVersion 1）。唯一会自动创建的文件
   creds/dashscope.json    阿里云 API key（600，永不回显、不进日志）
-  ...（capture 令牌等不在这里：采集口属于 mira_input）
+  ...（capture 令牌等不在这里：采集口属于 mira_device）
 ```
 
 写盘一律「临时文件 → fsync → rename → fsync 目录」（`lib/kit.mjs` 的 `writeJsonAtomic`）。
@@ -47,7 +47,7 @@ $DSH_HOME/mira_config/mira_audio/          # DSH_HOME 缺省 ~/.dsh
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | `false` = 不注册工具与路由 |
-| `tts.enabled` | `true` | 关掉后 `audio_say` 报 `config/missing` |
+| `tts.enabled` | `true` | 关掉后 `device_say` 报 `config/missing` |
 | `tts.provider` | `aliyun` | `aliyun` = 原生口（`/services/audio/tts/SpeechSynthesizer`，实测可用）；`openai` = `/audio/speech`。**base 要跟着选** |
 | `tts.base` | `https://token-plan.maas.qianwenaiapi.com/api/v1` | 原生口用 `api/v1`，兼容口用 `compatible-mode/v1` |
 | `tts.model` | `qwen-audio-3.0-tts-plus` | |
@@ -72,31 +72,31 @@ $DSH_HOME/mira_config/mira_audio/          # DSH_HOME 缺省 ~/.dsh
 
 | 工具 | 干什么 | 失败长什么样 |
 |---|---|---|
-| `audio_say` | 合成并让**页面出声**（形象开着时 LIVE2D 口型跟着音量动）。文本受 `tts.maxChars` 限制 | 没页面 → `delivery/failed`（声音没地方播）；没 key → `creds/missing`；空文本 → `tts/failed` |
-| `audio_status` | 只读：TTS/ASR 模型、VAD 参数、key 配没配、连着的页面数、最近一次朗读、计数 | 永不失败（配置坏了也报 `configError`） |
+| `device_say` | 合成并让**页面出声**（形象开着时 LIVE2D 口型跟着音量动）。文本受 `tts.maxChars` 限制 | 没页面 → `delivery/failed`（声音没地方播）；没 key → `creds/missing`；空文本 → `tts/failed` |
+| `media_status` | 只读：TTS/ASR 模型、VAD 参数、key 配没配、连着的页面数、最近一次朗读、计数 | 永不失败（配置坏了也报 `configError`） |
 
-> 说话的工具在 `mira_audio`、不在形象插件里 —— 这是拆分时用户明确的口径
+> 说话的工具在 `mira_media`、不在形象插件里 —— 这是拆分时用户明确的口径
 > （「各自的能力归各自的插件」）。形象只负责让嘴动。
 
 ## 5. 服务契约（别的插件怎么用）
 
-`ctx.provide('miraAudio', api)`，`inject: ['miraAudio']` 后：
+`ctx.provide('miraMedia', api)`，`inject: ['miraMedia']` 后：
 
 ```js
-miraAudio.version
-miraAudio.status()                     // 只读状态（含 configured / tts / asr / vad / credsFile）
-miraAudio.synthesize(text, { voice })  // → { mime, base64, bytes, chars, truncated, voice, model }（不播放）
-miraAudio.transcribe({ base64, mime, sampleRate })  // → { text, model }
-miraAudio.describeImage({ dataUrl, base, model, prompt, timeoutMs })  // 同一份 key 的网关能力
-miraAudio.say(text, { voice })         // 合成 + 广播 → { url, chars, clients, delivered, ... }
-miraAudio.vad()                        // { threshold, silenceMs, minSpeechMs, maxMs }
-miraAudio.createSegmenter({ vad?, sampleRate, maxAudioMs, onUtterance })  // PCM 断句器
-miraAudio.pcmToWav(pcm, sampleRate) / miraAudio.pcmRms(pcm)
-miraAudio.player()                     // { clients }（0 = 没页面，合成得出来但没地方播）
-miraAudio.publicConfig() / miraAudio.settingsView()
+miraMedia.version
+miraMedia.status()                     // 只读状态（含 configured / tts / asr / vad / credsFile）
+miraMedia.synthesize(text, { voice })  // → { mime, base64, bytes, chars, truncated, voice, model }（不播放）
+miraMedia.transcribe({ base64, mime, sampleRate })  // → { text, model }
+miraMedia.describeImage({ dataUrl, base, model, prompt, timeoutMs })  // 同一份 key 的网关能力
+miraMedia.say(text, { voice })         // 合成 + 广播 → { url, chars, clients, delivered, ... }
+miraMedia.vad()                        // { threshold, silenceMs, minSpeechMs, maxMs }
+miraMedia.createSegmenter({ vad?, sampleRate, maxAudioMs, onUtterance })  // PCM 断句器
+miraMedia.pcmToWav(pcm, sampleRate) / miraMedia.pcmRms(pcm)
+miraMedia.player()                     // { clients }（0 = 没页面，合成得出来但没地方播）
+miraMedia.publicConfig() / miraMedia.settingsView()
 ```
 
-`describeImage` 的 base/model 由调用方决定（`mira_input` 的 `vision.*`），因为"看什么图用哪个
+`describeImage` 的 base/model 由调用方决定（`mira_device` 的 `vision.*`），因为"看什么图用哪个
 模型"是输入侧的配置；**key 不出这个插件**。
 
 ## 5.1 指向本机 stream 网关（没有云端 key 也能出声；本机当前**不用**这条路，作备选）
@@ -105,7 +105,7 @@ miraAudio.publicConfig() / miraAudio.settingsView()
 `http://127.0.0.1:11089`，它把 TTS 交给本地 CosyVoice3、ASR 交给本地三路融合）：
 
 ```jsonc
-// $DSH_HOME/mira_config/mira_audio/config.json
+// $DSH_HOME/mira_config/mira_media/config.json
 {
   "tts": { "provider": "openai", "base": "http://127.0.0.1:11089/v1", "model": "stella", "voice": "rosy" },
   "asr": { "provider": "openai", "base": "http://127.0.0.1:11089/v1", "model": "stella", "language": "zh" }
@@ -121,20 +121,20 @@ miraAudio.publicConfig() / miraAudio.settingsView()
 - 音色：网关重启后可用的是它 `providers/voices/` 里的那些（本机实测 `rosy` / `mira` / `muse` / `hana`；
   doc 里的 `rosy_fix` 是旧名字）。`GET /v1/models` 只列 `stella` / `sylvia`。
 - **代价**：这条路的识图仍是另一回事（网关没有 OpenAI 兼容的"看图"端点，图的本地能力在
-  `/v2/image/select`）；所以 `mira_input` 的自动推帧（`vision.provider=aliyun`）仍然要云端 key，
-  而 `input_look` 的默认 `dsh` 模式不依赖任何 key。
+  `/v2/image/select`）；所以 `mira_device` 的自动推帧（`vision.provider=aliyun`）仍然要云端 key，
+  而 `device_look` 的默认 `dsh` 模式不依赖任何 key。
 
-## 6. HTTP 面（`/audio/api/*`，全部同源校验）
+## 6. HTTP 面（`/media/api/*`，全部同源校验）
 
 | 方法与路径 | 作用 |
 |---|---|
-| `GET /audio/api/bootstrap` | 配置（脱敏）、能力/凭据就绪、VAD、endpoints |
-| `GET /audio/api/events` | **SSE**：`hello` / `say`（`{ text, url, id, mime, chars, truncated, voice }`） |
-| `POST /audio/api/say` | `{ text, voice? }` → 合成 → 广播 `say` |
-| `POST /audio/api/asr` | `{ base64, mime, sampleRate }` → 识别 → **只回文本**（插话由输入侧决定） |
-| `GET /audio/api/audio/<id>` | 合成好的音频（内存 32 条 / 10 分钟） |
-| `GET/POST /audio/api/settings` | 设置页读写；GET **永不回 key**，只回 `keyConfigured` |
-| `GET /audio/api/health` | 存活探针（客户端数、TTS/ASR 开关、VAD、音频缓存） |
+| `GET /media/api/bootstrap` | 配置（脱敏）、能力/凭据就绪、VAD、endpoints |
+| `GET /media/api/events` | **SSE**：`hello` / `say`（`{ text, url, id, mime, chars, truncated, voice }`） |
+| `POST /media/api/say` | `{ text, voice? }` → 合成 → 广播 `say` |
+| `POST /media/api/asr` | `{ base64, mime, sampleRate }` → 识别 → **只回文本**（插话由输入侧决定） |
+| `GET /media/api/audio/<id>` | 合成好的音频（内存 32 条 / 10 分钟） |
+| `GET/POST /media/api/settings` | 设置页读写；GET **永不回 key**，只回 `keyConfigured` |
+| `GET /media/api/health` | 存活探针（客户端数、TTS/ASR 开关、VAD、音频缓存） |
 
 **同源守卫**：`Sec-Fetch-Site: cross-site` 或 `Origin` 与 `Host` 不同源一律 403。
 
@@ -143,7 +143,7 @@ miraAudio.publicConfig() / miraAudio.settingsView()
 `lib/client.js` 在页面里挂一个全局对象（播放器 + 电平），`muse_vtuber` 靠它画口型/频谱环：
 
 ```js
-window.__miraAudio__ = {
+window.__miraDevice__ = {
   version, state(), subscribe(fn),   // state: { ready, speaking, level, text, url, error }
   level(), analyser(), play(url), ready(),
 }
@@ -162,8 +162,8 @@ window.__miraAudio__ = {
    （只读旧文件、不删不改）。`settingsView.seededFrom` 会写明是否迁移过。
 2. **凭据**：新目录没有 `creds/dashscope.json`、旧目录有时，自动复制一份（600，旧文件保留）。
 3. **老配置里的键**（`camera` / `vision` / `events` …）不会被本插件读取；它们分别属于
-   `mira_input`，或留在旧文件里不再使用（README 在 `muse_vtuber` 里写明了这一点）。
-4. 回滚：停用 `mira_audio` 即可；旧 `muse_vtuber` 的配置与凭据原样未动。
+   `mira_device`，或留在旧文件里不再使用（README 在 `muse_vtuber` 里写明了这一点）。
+4. 回滚：停用 `mira_media` 即可；旧 `muse_vtuber` 的配置与凭据原样未动。
 
 ## 9. 已知取舍
 
@@ -172,7 +172,7 @@ window.__miraAudio__ = {
 3. **播放器是全局的**（不占槽位）：只要有一个页面连着就能出声；多个页面同时在场时**同时出声**
    （浏览器行为，不是 bug）。只想一端出声就在那端静音。
 4. **识图能力也在这里**：它和 TTS/ASR 共用一个网关与一份 key；但"用哪个模型、看哪张图"由
-   调用方（`mira_input`）决定。
+   调用方（`mira_device`）决定。
 5. 供应商形状差异（原生口 vs OpenAI 兼容口）已经写死在 `lib/aliyun.js` 里，并在
    `status()` 里回报实际用的 model/base，排障不用猜。
 
@@ -180,7 +180,7 @@ window.__miraAudio__ = {
 
 ```
 node test/smoke.mjs                 # → ALL PASS（通过 35 项断言），退出 0
-node ..\tool_shared\tools\check-zero-dep.mjs mira_audio
+node ..\tool_shared\tools\check-zero-dep.mjs mira_media
 node ..\tool_shared\tools\check-kit.mjs
 ```
 
@@ -188,8 +188,8 @@ node ..\tool_shared\tools\check-kit.mjs
 
 | # | 步骤 | 期望 |
 |---|---|---|
-| 1 | 设置 · 声音 → 填 API key → 保存 | 提示"API key 已写入 600 凭据文件"；`audio_status.credentials.configured=true` |
+| 1 | 设置 · 声音 → 填 API key → 保存 | 提示"API key 已写入 600 凭据文件"；`media_status.credentials.configured=true` |
 | 2 | 点「试听」 | 页面出声（先说一句「声音连接正常，我是星辉澪。」）；没声音时先点一下页面（浏览器自动播放策略） |
-| 3 | 让模型调 `audio_say {text:"..."}` | 出声；形象开着时口型跟着音量动 |
+| 3 | 让模型调 `device_say {text:"..."}` | 出声；形象开着时口型跟着音量动 |
 | 4 | 把 `vad.silenceMs` 改成 1200 再说话 | 断句变迟钝（停顿更久才算一句） |
-| 5 | 故意写错 key | `audio_say` 报 `tts/failed`，文案里 key 被抹成 `***` |
+| 5 | 故意写错 key | `device_say` 报 `tts/failed`，文案里 key 被抹成 `***` |
