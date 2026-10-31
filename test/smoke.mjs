@@ -652,7 +652,7 @@ await t('I1 apply：提供服务 + 1 个工具 + /media 路由', () => {
     assert.equal(result.tools, 1)
     assert.equal(ctx.registered.size, 1)
     assert.equal(ctx.routes.length, 1)
-    assert.equal(ctx.routes[0].path, '/audio')
+    assert.equal(ctx.routes[0].path, '/media')
     const api = ctx.provided.get('miraMedia')
     assert.ok(api && typeof api.synthesize === 'function' && typeof api.transcribe === 'function')
     assert.ok(typeof api.createSegmenter === 'function')
